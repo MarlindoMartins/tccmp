@@ -1,0 +1,48 @@
+name: Deploy PHP API para AWS ECS
+
+on:
+  push:
+    branches:
+      - main  # Executa quando há push na branch main
+
+jobs:
+  deploy:
+    name: Criar Infra AWS e Deploy no ECS
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do Código
+        uses: actions/checkout@v3
+
+      - name: Configurar AWS Credenciais
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Instalar Terraform
+        run: |
+          sudo apt-get update && sudo apt-get install -y unzip
+          curl -o terraform.zip https://releases.hashicorp.com/terraform/1.3.0/terraform_1.3.0_linux_amd64.zip
+          unzip terraform.zip
+          sudo mv terraform /usr/local/bin/
+
+      - name: Inicializar Terraform
+        run: terraform init
+
+      - name: Aplicar Terraform
+        run: terraform apply -auto-approve
+
+      - name: Login no Amazon ECR
+        run: |
+          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
+
+      - name: Build e Push da Imagem Docker para o ECR
+        run: |
+          docker build -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/php-api:latest ./app
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/php-api:latest
+
+      - name: Atualizar Serviço no ECS
+        run: |
+          aws ecs update-service --cluster php-api-cluster --service php-api-service --force-new-deployment
